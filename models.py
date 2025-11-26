@@ -1,0 +1,85 @@
+from fastapi import FastAPI, HTTPException
+from langchain_ollama import OllamaLLM
+from langchain_community.utilities import SQLDatabase
+from langchain_classic.chains.sql_database.query import create_sql_query_chain
+from database import DATABASE_URL
+from langchain_core.prompts.few_shot import FewShotPromptTemplate
+from langchain_core.prompts.prompt import PromptTemplate
+
+from pydantic import BaseModel
+import os
+import re
+
+top_k = 5
+
+# 향후 few shot을 위한 examples 는 분리
+examples = [
+    {
+        "input": "Show me all artists",
+        "query": "SELECT name FROM artist;"
+    },
+    {
+        "input": "How many albums are there?",
+        "query": "SELECT COUNT(*) FROM album;"
+    },
+    {
+        "input": "What Rock albums exist?",
+        "query": "SELECT a.title FROM album a JOIN track t ON a.album_id = t.album_id JOIN genre g ON t.genre_id = g.genre_id WHERE g.name = 'Rock' LIMIT 5;"
+    }
+]
+
+psql_prompt = PromptTemplate(
+    input_variables = ["input","query"],
+    template = "Question: {input}\nSQL:{query}"
+)
+
+fshot_prompt = FewShotPromptTemplate(
+    examples=examples,
+    example_prompt=psql_prompt,
+    prefix="""Given an input quesiton, create a syntatically correct PostgreSQL query.
+Critical Rules:
+1. Return ONLY the sql auery, no explanations, no other lines.
+2. Do NOT wrap in '''sql''' blocks
+3. Add "LIMIT {top_k}" at the end unless COUNT/SUM/AVG is used
+4. Only use columns from: {table_info}
+Examples:""",
+    suffix="Question:{input}\nSQL:",
+    input_variables=["input","top_k","table_info"]
+)
+
+
+def get_llm(model: str):
+
+    if model == "Ollama":
+        return OllamaLLM(model="llama3.2", temperature=0)
+    
+    # if model == "Gpt-3.5":
+    #     return ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+
+class QueryRequest(BaseModel):
+    question: str
+
+def generate_sql(question: str, db_path: str) -> str:    
+    llm = get_llm("Ollama")
+    db = SQLDatabase.from_uri(DATABASE_URL)
+
+    chain = create_sql_query_chain(
+    llm=llm,
+    db=db,
+    k=top_k,
+    prompt=fshot_prompt
+    )
+
+    response = chain.invoke({"question": question})
+    sql = extract_sql(response.strip())
+
+    result = db.run(sql)
+    return sql, result
+
+# SQL 블록 제거
+def extract_sql(text: str) -> str:
+    match = re.search(r'```sql\s*(.*?)\s*```', text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    
+    return text.strip()
