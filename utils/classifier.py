@@ -1,0 +1,79 @@
+import re
+
+SQL_comp1 = ["WHERE", "GROUP BY", "ORDER BY", "LIMIT", "JOIN", "OR", "LIKE"]
+SQL_comp2 = ["EXCEPT", "UNION", "INTERSECT"] # and sub query
+SQL_aggs = ["COUNT", "MIN", "MAX", "SUM", "AVG"]
+"""
+Others: number of agg > 1,
+number of select columns > 1,
+number of where conditions > 1,
+number of group by clauses > 1,
+number of group by clauses > 1 (no consider col1-col2 math equations etc.)
+
++ based on eval_example, HAVING is not included in comp1
+"""
+
+def classify_hardness(query: str):   
+    comp1_count = sum(1 for keyword in SQL_comp1 if re.search(rf'\b{keyword}\b', query) and keyword != 'JOIN') 
+    comp1_count += len(re.findall(r'\bJOIN\b', query))
+    agg_count = sum(1 for keyword in SQL_aggs if re.search(rf'\b{keyword}\b', query, re.IGNORECASE))
+    where_match = re.search(r'WHERE\s+(.+?)(?=\s+GROUP BY|\s+ORDER BY|\s+LIMIT|$)', query)
+    where_count = 0
+
+    subquery_count = query.count('(SELECT')
+    subquery_removed = re.sub(r'\(SELECT.*?\)', '', query, flags=re.DOTALL)
+    comp2_count = sum(1 for keyword in SQL_comp2 if re.search(rf'\b{keyword}\b', subquery_removed))
+
+    if subquery_count > 0:
+        comp2_count += 1
+
+    if where_match:
+        where_part = where_match.group(1)
+        where_count = 1 + len(re.findall(r'\b(?:AND|OR)\b', where_part))
+    groupby_match = re.search(r'GROUP BY\s+(.+?)(?=\s+(?:HAVING|ORDER BY|LIMIT|$))', query)
+    col_match = re.search(r'SELECT\s+(.*?)\s+FROM', query)
+
+    num_cols = 0
+    if col_match:
+        col_part = col_match.group(1).strip()
+        num_cols = len(col_part.split(','))
+
+    num_groupby = 0
+    if groupby_match:
+        groupby_part = groupby_match.group(1).strip()
+        num_groupby = len(groupby_part.split(','))
+
+    others_count = sum([
+        agg_count > 1,
+        num_cols > 1,
+        where_count > 1,
+        num_groupby > 1
+    ])
+
+    counts = {"comp1_count": comp1_count, "comp2_count": comp2_count,
+              "others": others_count, "num_cols": num_cols, "agg_count": agg_count,
+              "where_count": where_count, "num_groupby": num_groupby}
+    # easy: 0 - 1 from comp1, none from comp2, no condition from others satisfied
+    if comp1_count < 2 and comp2_count == 0 and others_count == 0:
+        return "easy", counts
+    
+    # medium: Others < 3, comp1 < 2 , 0 in comp2,
+    # OR
+    # comp1 = 2, Others < 2 , and 0 from comp2
+    if ((others_count < 3 and comp1_count < 2 and comp2_count == 0)
+        or (others_count < 2 and comp1_count == 2 and comp2_count == 0)):
+        return "medium", counts
+
+    # hard: > 2 others, comp1 < 3 , 0 in comp2
+    # OR
+    # 2 < comp1 <= 3, Others < 3 , 0 in comp2
+    # OR
+    # comp1 < 2, 0 in others, comp2 = 1
+    if ((others_count > 2 and comp1_count < 3 and comp2_count == 0)
+        or (2 < comp1_count <= 3 and others_count < 3 and comp2_count == 0)
+        or (comp1_count < 2 and others_count == 0 and comp2_count == 1)
+        #or (comp1_count == 2 and others_count == 0 and comp2_count == 1 )
+        ):
+        return "hard", counts
+
+    return "extra", counts

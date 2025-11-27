@@ -1,9 +1,10 @@
 import json
 from pathlib import Path
 from models import generate_sql
+import time
 
 spider_db_dir_path = Path('/home/sykwon/spider/database')
-
+BATCH_SIZE = 100
 def run_spider_benchmark(spider_dir: str = "../spider"):
     spider_path = Path(spider_dir)
 
@@ -24,8 +25,8 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
     total = len(dev_data)
 
     print(f"Starting Spider benchmark on {total} examples .... ")
-
-    for idx, example in enumerate(dev_data, 1):
+    start_time = time.time()
+    for idx, example in enumerate(dev_data[:total], 1):
         question = example["question"]
         db_id = example["db_id"]
         gold_sql = example["query"]
@@ -35,8 +36,8 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
             print(f"Warning: DB db_id = {db_id} not found")
             continue
         
-        print(f"Trying to access: {db_path}")
-        print(f"File exists: {db_path.exists()}")
+        # print(f"Trying to access: {db_path}")
+        # print(f"File exists: {db_path.exists()}")
 
         try:
             predicted_sql, predicted_result = generate_sql(question, f"sqlite:///{db_path}", use_limit=False)
@@ -68,6 +69,8 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
                 "success": False,
                 "error": str(e)
             })
+    end_time = time.time()
+    elapsed_time = end_time - start_time
     
     output_dir = Path(__file__).parent
     pred_file = output_dir / "pred.sql"
@@ -87,6 +90,7 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
     # 정확도는 여기서 만들어진 sql 문으로
     success_count = sum(1 for r in results if r["success"])
     print(f"Success rate: {success_count}/{total} ({success_count/total*100:.1f}%)")
+    print(f"Total Execution Time: {int(elapsed_time//60)}분 {elapsed_time%60:.2f}초")
     
     return {
         "total": total,

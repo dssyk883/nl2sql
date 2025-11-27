@@ -6,27 +6,49 @@ from langchain_core.prompts.few_shot import FewShotPromptTemplate
 from langchain_core.prompts.prompt import PromptTemplate
 
 from pydantic import BaseModel
-import os
+from pathlib import Path
 import re
 
+EXAMPLE_PATH = Path(__file__).parent / "utils" / "examples.txt"
 top_k = 5
 K = 5
 
-# 향후 few shot을 위한 examples 는 분리
-examples = [
-    {
-        "input": "Show me all artists",
-        "query": "SELECT name FROM artist;"
-    },
-    {
-        "input": "How many albums are there?",
-        "query": "SELECT COUNT(*) FROM album;"
-    },
-    {
-        "input": "What Rock albums exist?",
-        "query": "SELECT a.title FROM album a JOIN track t ON a.album_id = t.album_id JOIN genre g ON t.genre_id = g.genre_id WHERE g.name = 'Rock' LIMIT 5;"
-    }
-]
+def load_fixed_examples():
+    examples = []
+
+    with open(EXAMPLE_PATH, "r") as f:
+        lines = f.readlines()
+    
+    question = None
+    for l in lines:
+        l = l.strip()
+        if l.startswith("Question:"):
+            question = l.replace("Question:", "").strip()
+        elif l.startswith("SQL:"):
+            query = l.replace("SQL:", "").strip()
+            if question:
+                examples.append({"input": question, "query": query})
+                question = None
+    
+    return examples
+
+examples = load_fixed_examples()
+
+# # 향후 few shot을 위한 examples 는 분리
+# examples = [
+#     {
+#         "input": "Show me all artists",
+#         "query": "SELECT name FROM artist;"
+#     },
+#     {
+#         "input": "How many albums are there?",
+#         "query": "SELECT COUNT(*) FROM album;"
+#     },
+#     {
+#         "input": "What Rock albums exist?",
+#         "query": "SELECT a.title FROM album a JOIN track t ON a.album_id = t.album_id JOIN genre g ON t.genre_id = g.genre_id WHERE g.name = 'Rock' LIMIT 5;"
+#     }
+# ]
 
 psql_prompt = PromptTemplate(
     input_variables = ["input","query"],
