@@ -9,81 +9,68 @@ from pydantic import BaseModel
 from pathlib import Path
 import re
 
+from utils.fixed_examples import create_fixed_examples
+from utils.RAG_examples import retrieve_RAG_examples
+from utils.random_examples import create_random_examples
+
 EXAMPLE_PATH = Path(__file__).parent / "utils" / "examples.txt"
 top_k = 5
 K = 5
+_static_prompt_cache = {}
 
-def load_fixed_examples():
-    examples = []
+def create_examples(question: str, example_type: str = ""):
+    if not example_type: # baseline - 랜덤한 K 개의 예제
+        return create_random_examples(K)
 
-    with open(EXAMPLE_PATH, "r") as f:
-        lines = f.readlines()
-    
-    question = None
-    for l in lines:
-        l = l.strip()
-        if l.startswith("Question:"):
-            question = l.replace("Question:", "").strip()
-        elif l.startswith("SQL:"):
-            query = l.replace("SQL:", "").strip()
-            if question:
-                examples.append({"input": question, "query": query})
-                question = None
-    
-    return examples
+    if example_type == "fixed":
+        return create_fixed_examples(K)
 
-examples = load_fixed_examples()
+    if example_type == "rag":
+        return retrieve_RAG_examples(question, K)
 
-# # 향후 few shot을 위한 examples 는 분리
-# examples = [
-#     {
-#         "input": "Show me all artists",
-#         "query": "SELECT name FROM artist;"
-#     },
-#     {
-#         "input": "How many albums are there?",
-#         "query": "SELECT COUNT(*) FROM album;"
-#     },
-#     {
-#         "input": "What Rock albums exist?",
-#         "query": "SELECT a.title FROM album a JOIN track t ON a.album_id = t.album_id JOIN genre g ON t.genre_id = g.genre_id WHERE g.name = 'Rock' LIMIT 5;"
-#     }
-# ]
+NOLIMIT_PREFIX = """Given an input quesiton, create a syntatically correct PostgreSQL query.
+Critical Rules:
+1. Return ONLY the sql auery, no explanations, no other lines.
+2. Do NOT wrap in '''sql''' blocks
+3. Only use columns from: {table_info}
+(top_k : {top_k} for reference only, do not add LIMIT unless question specifies)
+Examples:"""
+
+LIMIT_PREFIX = """Given an input quesiton, create a syntatically correct PostgreSQL query.
+Critical Rules:
+1. Return ONLY the sql auery, no explanations, no other lines.
+2. Do NOT wrap in '''sql''' blocks
+3. Add "LIMIT {top_k}" at the end unless COUNT/SUM/AVG is used
+4. Only use columns from: {table_info}
+Examples:"""
 
 psql_prompt = PromptTemplate(
     input_variables = ["input","query"],
     template = "Question: {input}\nSQL:{query}"
 )
 
-fshot_prompt_limit = FewShotPromptTemplate(
-    examples=examples,
-    example_prompt=psql_prompt,
-    prefix="""Given an input quesiton, create a syntatically correct PostgreSQL query.
-Critical Rules:
-1. Return ONLY the sql auery, no explanations, no other lines.
-2. Do NOT wrap in '''sql''' blocks
-3. Add "LIMIT {top_k}" at the end unless COUNT/SUM/AVG is used
-4. Only use columns from: {table_info}
-Examples:""",
-    suffix="Question:{input}\nSQL:",
-    input_variables=["input","top_k","table_info"]
-)
+def create_prompt(question: str, example_type: str, use_limit: bool):
+    cache_key = (example_type, use_limit)
 
-# 벤치마크 프롬프트 - top_k 미사용 
-fshot_prompt_nolimit = FewShotPromptTemplate(
-    examples=examples,
-    example_prompt=psql_prompt,
-    prefix="""Given an input quesiton, create a syntatically correct PostgreSQL query.
-Critical Rules:
-1. Return ONLY the sql auery, no explanations, no other lines.
-2. Do NOT wrap in '''sql''' blocks
-3. Only use columns from: {table_info}
-(top_k : {top_k} for reference only, do not add LIMIT unless question specifies)
-Examples:""",
-    suffix="Question:{input}\nSQL:",
-    input_variables=["input","top_k","table_info"]
-)
+    if cache_key in _static_prompt_cache:
+        print(f"*** cache found: Using cache ... ")
+        return _static_prompt_cache[cache_key]
+    
+    print(f"*** create_prompt: Creating examples & prompt ... ")
 
+    examples = create_examples(question, example_type)
+    prompt = FewShotPromptTemplate(
+        examples=examples,
+        example_prompt=psql_prompt,
+        prefix=LIMIT_PREFIX if use_limit else NOLIMIT_PREFIX,
+        suffix="Question:{input}\nSQL:",
+        input_variables=["input","top_k","table_info"]
+    )
+
+    if example_type != "rag":
+        _static_prompt_cache[cache_key] = prompt
+    
+    return prompt
 
 def get_llm(model: str):
 
@@ -95,31 +82,29 @@ def get_llm(model: str):
 
 class QueryRequest(BaseModel):
     question: str
+   
 
-def generate_sql(question: str, db_uri: str, use_limit: bool = True) -> tuple[str, str]:    
+def generate_sql(question: str, example_type: str, db_uri: str, use_limit: bool = True) -> tuple[str, str]:    
     llm = get_llm("Ollama")
     db = SQLDatabase.from_uri(db_uri)
+
+    prompt = create_prompt(question, example_type, use_limit)
 
     chain = create_sql_query_chain(
     llm=llm,
     db=db,
     k=K,
-    prompt=fshot_prompt_limit if use_limit else fshot_prompt_nolimit
+    prompt=prompt
     )
-
-    # try:
-    #     response = chain.invoke({"question": question})
-    #     print(f"Response received: {response}...")
-    #     sql = extract_sql(response.strip())
-    # except TypeError as e:
-    #     print(f" *** TypeError during Invoke - no sql generated")
-
+    
     response = chain.invoke({"question": question})
     sql = extract_sql(response.strip())
 
-    result = db.run(sql)    
+    return sql
 
-    return sql, result
+def run_db(sql: str, db_uri: str):
+    db = SQLDatabase.from_uri(db_uri)
+    return db.run(sql)
 
 # SQL 블록 제거
 def extract_sql(text: str) -> str:

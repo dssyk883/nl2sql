@@ -29,7 +29,9 @@ if __name__ == "__main__":
     # 벤치마크 실행 시
     if len(sys.argv) > 1 and sys.argv[1] == "benchmark":
         from evaluation.benchmark import run_spider_benchmark
-        metrics = run_spider_benchmark()
+        batch_size = int(sys.argv[2]) if len(sys.argv) > 2 else 100
+        example_type = sys.argv[3] if len(sys.argv) > 3 else ""
+        metrics = run_spider_benchmark(batch_size, example_type)
         print(f"Total: {metrics['total']}, Success: {metrics['success']}")
     # Ollama 실행용
     else:

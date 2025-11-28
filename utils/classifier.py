@@ -13,7 +13,7 @@ number of group by clauses > 1 (no consider col1-col2 math equations etc.)
 + based on eval_example, HAVING is not included in comp1
 """
 
-def classify_hardness(query: str):   
+def classify_level (query: str):   
     comp1_count = sum(1 for keyword in SQL_comp1 if re.search(rf'\b{keyword}\b', query) and keyword != 'JOIN') 
     comp1_count += len(re.findall(r'\bJOIN\b', query))
     agg_count = sum(1 for keyword in SQL_aggs if re.search(rf'\b{keyword}\b', query, re.IGNORECASE))

@@ -1,14 +1,15 @@
 import json
 from pathlib import Path
-from models import generate_sql
+from models import generate_sql, run_db
+from utils.classifier import classify_level
 import time
 
 spider_db_dir_path = Path('/home/sykwon/spider/database')
-BATCH_SIZE = 100
-def run_spider_benchmark(spider_dir: str = "../spider"):
-    spider_path = Path(spider_dir)
+spider_dir_path = Path('/home/sykwon/spider')
 
-    examples_path = spider_path / "evaluation_examples" / "examples"
+def run_spider_benchmark(batch_size:int = 100, example_type:str = ""):
+    print(f"example_type: {example_type}")
+    examples_path = spider_dir_path / "evaluation_examples" / "examples"
     dev_json_path = examples_path  / "dev.json"
     tables_json_path = examples_path / "tables.json"
 
@@ -22,11 +23,10 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
 
     predictions = []
     results = []
-    total = len(dev_data)
 
-    print(f"Starting Spider benchmark on {total} examples .... ")
+    print(f"Starting Spider benchmark on {batch_size} examples .... ")
     start_time = time.time()
-    for idx, example in enumerate(dev_data[:total], 1):
+    for idx, example in enumerate(dev_data[:batch_size], 1):
         question = example["question"]
         db_id = example["db_id"]
         gold_sql = example["query"]
@@ -39,8 +39,11 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
         # print(f"Trying to access: {db_path}")
         # print(f"File exists: {db_path.exists()}")
 
+        predicted_sql = generate_sql(question, example_type, f"sqlite:///{db_path}", use_limit=False)
+        level = classify_level(gold_sql)
+
         try:
-            predicted_sql, predicted_result = generate_sql(question, f"sqlite:///{db_path}", use_limit=False)
+            predicted_result = run_db(predicted_sql, f"sqlite:///{db_path}")
 
             predictions.append(predicted_sql)
 
@@ -49,12 +52,13 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
                 "predicted_sql": predicted_sql,
                 "predicted_result": predicted_result,
                 "gold_sql": gold_sql,
+                "level": level,
                 "db_id": db_id,
                 "success": True
             })
 
             if idx % 10 == 0:
-                print(f"Progress: {idx} / {total}")
+                print(f"Progress: {idx} / {batch_size}")
         
         except Exception as e:
             print(f"Error on example {idx}: {str(e)}")
@@ -62,9 +66,10 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
             predictions.append("SELECT * LIMIT 1") # fallback
             results.append({
                 "question": question,
-                "predicted_sql": None,
+                "predicted_sql": predicted_sql,
                 "predicted_result": None,
                 "gold_sql": gold_sql,
+                "level": level,
                 "db_id": db_id,
                 "success": False,
                 "error": str(e)
@@ -86,15 +91,15 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
     print(f"Predictions saved to {pred_file}")
     print(f"Detailed results saved to {results_file}")
     
-    # 단순 sql 출력, 추출, 실행 성공률 (정확성 XX)
+    # 단순 sql 실행 성공률 (정확성 XX)
     # 정확도는 여기서 만들어진 sql 문으로
     success_count = sum(1 for r in results if r["success"])
-    print(f"Success rate: {success_count}/{total} ({success_count/total*100:.1f}%)")
+    print(f"Success rate: {success_count}/{batch_size} ({success_count/batch_size*100:.1f}%)")
     print(f"Total Execution Time: {int(elapsed_time//60)}분 {elapsed_time%60:.2f}초")
     
     return {
-        "total": total,
+        "total": batch_size,
         "success": success_count,
-        "failed": total - success_count,
+        "failed": batch_size - success_count,
         "results": results
     }
