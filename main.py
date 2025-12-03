@@ -1,11 +1,9 @@
 from fastapi import FastAPI, HTTPException
-from langchain_ollama import OllamaLLM
-from langchain_community.utilities import SQLDatabase
-from langchain_classic.chains.sql_database.query import create_sql_query_chain
 from database import DATABASE_URL
 from models import generate_sql
 from pydantic import BaseModel
-
+from evaluation.benchmark import run_spider_benchmark
+import argparse
 
 app = FastAPI()
 
@@ -25,15 +23,26 @@ async def text_to_sql(request: QueryRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 if __name__ == "__main__":
-    import sys
-    # 벤치마크 실행 시
-    if len(sys.argv) > 1 and sys.argv[1] == "benchmark":
-        from evaluation.benchmark import run_spider_benchmark
-        batch_size = int(sys.argv[2]) if len(sys.argv) > 2 else 100
-        example_type = sys.argv[3] if len(sys.argv) > 3 else ""
-        metrics = run_spider_benchmark(batch_size, example_type)
-        print(f"Total: {metrics['total']}, Success: {metrics['success']}")
-    # Ollama 실행용
+    parser = argparse.ArgumentParser(description='Text2SQL Few-Shot Benchmark')
+    parser.add_argument('-m', '--mode', choices=['benchmark', 'app'],
+                        default='benchmark', help='Execution mode')
+    parser.add_argument('-s', '--strategy', choices=['random', 'rag', 'ic', 'jacc'],
+                        default='random', help='Few-shot retrieval strategy')
+    parser.add_argument('--model', choices=['qwen', 'mistral'],
+                        default='qwen', help='LLM Model')
+    parser.add_argument('-b', '--batch', type=int, default=100,
+                        help='Batch size: number of examples to evaluate')    
+    parser.add_argument('-k', '--k-examples', type=int, default=5,
+                        help='Number of few-shot examples')
+    parser.add_argument('-c', '--cluster', type=int, default=1,
+                        help='Number of clusters in intent-clustering')
+    parser.add_argument('--use-limit', action='store_true', help='Add LIMIT clause to SQL')
+    
+    args = parser.parse_args()
+
+    if args.mode == 'benchmark':
+        run_spider_benchmark(args)
+
     else:
         import uvicorn
         uvicorn.run(app, host="0.0.0.0", port=8000)

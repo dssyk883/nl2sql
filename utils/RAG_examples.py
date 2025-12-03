@@ -1,14 +1,13 @@
 import pickle
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
+from paths import DATA_DIR, INDEX_DIR
 import faiss
 import numpy as np
-
-PRJ_ROOT = Path(__file__).parent.parent
-DATA_DIR = PRJ_ROOT / "data"
-INDEX_DIR = DATA_DIR / "index"
+import re
 
 embeddings_file = INDEX_DIR / "embeddings.npy"
+db_ids_file = INDEX_DIR / "db_ids.pkl"
 questions_file = INDEX_DIR / "questions.pkl"
 sqls_file = INDEX_DIR / "sqls.pkl"
 faiss_index_file = INDEX_DIR / "faiss.index"
@@ -18,11 +17,21 @@ train_questions = []
 train_sqls = []
 faiss_index = None
 
+LEVEL_RATIO = {
+    "easy": 0.3,
+    "medium": 0.3,
+    "hard": 0.2,
+    "extra": 0.2
+}
+
 def load_index():
-    global embedder, train_questions, train_sqls, faiss_index
+    global embedder, embeddings, train_questions, train_sqls, faiss_index
 
     print("*** Loading embedder...")
-    embedder = SentenceTransformer('all-MiniLM-L6-v2')
+    embedder = SentenceTransformer('BAAI/bge-base-en-v1.5')
+
+    print("*** Loading embeddings...")
+    embeddings = np.load(embeddings_file)
 
     print("*** Loading questions...")
     with open(questions_file, 'rb') as f:
@@ -37,37 +46,47 @@ def load_index():
 
     print(f"*** Load {len(train_questions)} vectors on CPU")
 
+def extract_tables(schema: str) -> set:
+    """스키마에서 테이블명 추출"""
+    tables = re.findall(r'CREATE TABLE ["\']?(\w+)["\']?', schema, re.IGNORECASE)
+    return set(t.lower() for t in tables)
 
 
-def retrieve_RAG_examples(question: str, k: int = 3) -> list:
-    """
-    RAG retrieve
-    질문과 유사한 예제 k 개의 검색
+def extract_tables_from_sql(sql: str) -> set:
+    """Question SQL에서 사용된 테이블명 추출"""
+    # FROM, JOIN 뒤의 테이블명
+    tables = re.findall(r'(?:FROM|JOIN)\s+["\']?(\w+)["\']?', sql, re.IGNORECASE)
+    return set(t.lower() for t in tables)
 
-    Args:
-        question: 사용자 질문
-        k: 반환할 예제 개수
-    """
 
+def table_overlap_score(schema_tables: set, sql_tables: set) -> float:
+    """테이블 overlap 점수 계산"""
+    if not sql_tables:
+        return 0.0
+    intersection = schema_tables & sql_tables
+    # print(f"=== Table overlap Score: {len(intersection) / len(sql_tables)} ===")
+    return len(intersection) / len(sql_tables)
+
+
+def retrieve_RAG_examples(question: str, schema: str, k: int = 5) -> list:
     if faiss_index is None:
         load_index()
-    
+       
     query_embedding = embedder.encode([question], convert_to_numpy=True)
-    # SentenceTransformer - float64 사용, 
-    # faiss - float32 사용
     query_embedding = query_embedding.astype('float32')
     faiss.normalize_L2(query_embedding)
+    
+    distances, indices = faiss_index.search(query_embedding, k*3)
 
-    distances, indices = faiss_index.search(query_embedding, k)
-
-    examples = []
-    for i, idx in enumerate(indices[0]):
-        # print(f"{i+1}. 거리: {distances[0][i]:.3f}")
-        # print(f"   Q: {train_questions[idx]}")
-        # print(f"   SQL: {train_sqls[idx][:80]}...\n")
-        examples.append({
-            "input": train_questions[idx],
-            "query": train_sqls[idx]
-        })
+    schema_tables = extract_tables(schema)    
+    scored = []
+    for idx, dist in zip(indices[0], distances[0]):
+        sql_tables = extract_tables_from_sql(train_sqls[idx])
+        overlap = table_overlap_score(schema_tables, sql_tables)
+        mix_score = dist * 0.7 + overlap * 0.3
+        scored.append((idx, mix_score))
+    
+    final = sorted(scored, key=lambda x: x[1], reverse=True)[:k]
+    examples = [{"input": train_questions[i], "query": train_sqls[i]} for i, _ in final]
 
     return examples
