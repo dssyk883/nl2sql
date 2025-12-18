@@ -3,11 +3,14 @@ from dotenv import load_dotenv
 import os
 
 from utils.RAG_setup import summarize_schema
-from models import create_examples, create_prompt, extract_sql
+from models import create_examples, extract_sql
 
 load_dotenv()
 
-claude_client = Anthropic(api_key=os.getenv("ANTHROPIC_API"))
+def get_claude_client():
+    return Anthropic(api_key=os.getenv("ANTHROPIC_API"))
+
+claude_client = get_claude_client()
 
 
 top_k = 5

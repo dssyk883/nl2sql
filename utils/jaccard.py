@@ -46,8 +46,8 @@ def retrieve_jaccard_examples(question, k=5):
     examples = []
     for _, idx in scores[:k]:
         examples.append({
-            "input": train_questions[idx],
-            "query": train_sqls[idx]
+            "question": train_questions[idx],
+            "sql": train_sqls[idx]
         })
     
     return examples
