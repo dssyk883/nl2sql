@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from models import generate_sql, run_db
+from claude_integration import generate_sql_claude
 from utils.classifier import classify_level
 from utils.RAG_setup import summarize_schema, get_schema_safe
 import time
@@ -34,20 +35,6 @@ def run_spider_benchmark(args):
     batch = random.sample(dev_data, args.batch)
     # RELOAD_COUNT = 108
     for idx, example in enumerate(batch, 1):
-        # if idx < RELOAD_COUNT - 1:
-        #     continue
-        # if args.model == "mistral" and idx == RELOAD_COUNT:
-        #     print(f"\n[RELOAD] Reloading Ollama model...")
-        #     import subprocess
-        #     try:
-        #         # 모델 unload & reload
-        #         subprocess.run(['ollama', 'stop', "mistral:7b-instruct-q4_0"], 
-        #                     capture_output=True, timeout=10)
-        #         time.sleep(2)
-        #         print(f"[RELOAD] Model reloaded successfully\n")
-        #     except Exception as e:
-        #         print(f"[WARNING] Model reload failed: {e}\n")
-
         question = example["question"]
         db_id = example["db_id"]
         gold_sql = example["query"]
@@ -58,13 +45,16 @@ def run_spider_benchmark(args):
             continue
         schema = get_schema_safe(db_id)
         summarized_schema = summarize_schema(schema)
-        # print(f"Trying to access: {db_path}")
-        # print(f"File exists: {db_path.exists()}")       
-        # print(f"[{idx}] Generating SQL...")
-        predicted_sql = generate_sql(question,
+        if args.model == 'sonnet':
+            predicted_sql = generate_sql_claude(question,
+                                                schema,
+                                                args)
+        else:# Generate SQL 
+            predicted_sql = generate_sql(question,
                                      schema,
                                      args,
                                      f"sqlite:///{db_path}")
+        
         # print(f"[{idx}] Generated: {predicted_sql}")
         level, counts = classify_level(gold_sql)
         # print(f"*** predicted sql: {predicted_sql}")
@@ -107,7 +97,7 @@ def run_spider_benchmark(args):
     end_time = time.time()
     elapsed_time = end_time - start_time
     
-    output_dir = Path(__file__).parent / f"{args.model}_{args.batch}_k-{args.k_examples}"
+    output_dir = Path(__file__).parent.parent / "output" / f"{args.model}_{args.batch}_k-{args.k_examples}"
     pred_file = output_dir / f"pred-{args.strategy}.sql"
     output_dir.mkdir(parents=True, exist_ok=True)
     with open(pred_file, "w") as f:

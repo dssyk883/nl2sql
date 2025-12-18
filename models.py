@@ -19,18 +19,6 @@ EXAMPLE_PATH = Path(__file__).parent / "utils" / "examples.txt"
 top_k = 5
 K = 5
 
-# NOLIMIT_PREFIX = """You are a SQLite expert. Given an input question and database schema, create a syntactically correct SQLite query.
-# Schema: {table_info}
-# Critical Rules:
-# 1. If a table/column is not in the schema above, you CANNOT use it
-# 2. Check spelling carefully (case-sensitive)
-# 3. Do NOT use common sense - use ONLY what's in the schema
-# 4. Return ONLY the SQL query
-
-# Study these examples ONLY for the SQL query:
-# (top_k : {top_k} for reference only, do not add LIMIT unless question specifies)
-# Examples:"""
-
 K0_PREFIX = """You are a SQLite expert."""
 K0_SUFFIX = """Schema: {table_info}
 Question: {input}"""

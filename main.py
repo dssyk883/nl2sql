@@ -28,7 +28,7 @@ if __name__ == "__main__":
                         default='benchmark', help='Execution mode')
     parser.add_argument('-s', '--strategy', choices=['random', 'rag', 'ic', 'jacc'],
                         default='random', help='Few-shot retrieval strategy')
-    parser.add_argument('--model', choices=['qwen', 'mistral'],
+    parser.add_argument('--model', choices=['qwen', 'mistral', 'sonnet'],
                         default='qwen', help='LLM Model')
     parser.add_argument('-b', '--batch', type=int, default=100,
                         help='Batch size: number of examples to evaluate')    
