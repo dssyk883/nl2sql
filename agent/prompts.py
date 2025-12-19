@@ -31,10 +31,10 @@ class PromptBuilder:
             return self._build_analyze_prompt(memory)
         elif state == AgentState.GATHER_INFO:
             return self._build_gather_info_prompt(memory)
-        # elif state == AgentState.GENERATE_SQL:
-        #     return self._build_generate_sql_prompt(memory)
-        elif state == AgentState.VALIDATE_SQL:
-            return self._build_validate_sql_prompt(memory)
+        elif state == AgentState.GENERATE_SQL:
+            return self._build_generate_sql_prompt(memory)
+        # elif state == AgentState.VALIDATE_SQL:
+        #     return self._build_validate_sql_prompt(memory)
         elif state == AgentState.REFINE_SQL:
             return self._build_refine_sql_prompt(memory)
         else:
@@ -45,7 +45,7 @@ class PromptBuilder:
 
         prompt = f"""You are an NL2SQL agent. Analyze this question and decided what to do next.
 
-User Question: {memory.qeustion}
+User Question: {memory.question}
 
 Current Status:
 - Schema loaded?: {memory.has_schema()}
@@ -93,8 +93,8 @@ Respond with ONLY the action name (e.g., "get_db_schema")
 
         for i, ex in enumerate(memory.examples, 1):
             formatted_ex += f"Example {i}:\n"
-            formatted_ex += f"Question: {ex['question']}\n"
-            formatted_ex += f"SQL: {ex['sql']}\n"
+            formatted_ex += f"Question: {ex['input']}\n"
+            formatted_ex += f"SQL: {ex['query']}\n"
 
         prompt = f"""You are a SQLite expert. Learn these natural languages to SQL examples.
 Examples:
@@ -108,7 +108,7 @@ Critical Rules:
 3. Do NOT use common sense - use ONLY what's in the schema
 4. Return ONLY the SQL query
 
-Question: {memory.qeustion}
+Question: {memory.question}
 """
         return prompt.strip()
     

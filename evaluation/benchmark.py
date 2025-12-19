@@ -75,6 +75,7 @@ def run_spider_benchmark(args):
                 "db_id": db_id,
                 "success": True
             })
+            print(f"Success: {idx} / {args.batch}")
         
         except Exception as e:
             # print(f"Error on example {idx}: {str(e)}")
@@ -91,8 +92,8 @@ def run_spider_benchmark(args):
                 "success": False,
                 "error": str(e)
             })
-
-        print(f"Success: {idx} / {args.batch}")
+            print(f"Failed: {idx} / {args.batch}")        
+        
         if idx % 10 == 0:
             print(f"Progress: {idx} / {args.batch}")
     end_time = time.time()

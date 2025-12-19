@@ -16,7 +16,7 @@ class SQLAttempt:
 @dataclass
 class AgentMemory:
 
-    qeustion: str
+    question: str
 
     # Database information
     schema: Optional[str] = None

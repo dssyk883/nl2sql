@@ -1,4 +1,5 @@
 import json
+from enum import Enum
 from pathlib import Path
 import random
 import time
@@ -13,6 +14,11 @@ examples_path = spider_dir_path / "evaluation_examples" / "examples"
 dev_json_path = examples_path  / "dev.json"
 tables_json_path = examples_path / "tables.json"
 
+class EnumEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Enum):
+            return obj.value
+        return super().default(obj)
 
 def run_spider_agent_benchmark(args):
     agent = NL2SQLAgent(
@@ -68,24 +74,29 @@ def run_spider_agent_benchmark(args):
             "error": result.get('error', None),
             "error_type": result.get('error_type', None),
             "success": result['success'],
-
+            "trace": result['trace'] if result['trace'] else None
         })
 
-        print(f"Success: {idx} / {args.batch}")
+        if result['success']:
+            print(f"Success: {idx} / {args.batch}")
+        else:
+            print(f"Failed: {idx} / {args.batch}")
         if idx % 10 == 0:
             print(f"Progress: {idx} / {args.batch}")
     end_time = time.time()
     elapsed_time = end_time - start_time
     
-    output_dir = Path(__file__).parent.parent / "output" / f"{args.model}_{args.batch}_k-{args.k_examples}"
-    pred_file = output_dir / f"pred-{args.strategy}.sql"
+    output_dir = Path(__file__).parent.parent / "output" / f"agent_{args.model}_{args.batch}_k-{args.k_examples}"
+    # pred_file = output_dir / f"pred-{args.strategy}.sql"
+    # Jaccard Sim Strategy for now
+    pred_file = output_dir / f"pred.sql"
     output_dir.mkdir(parents=True, exist_ok=True)
     with open(pred_file, "w") as f:
         f.write("\n".join(predictions))
     
-    results_file = output_dir / f"predictions-{args.strategy}.json"
+    results_file = output_dir / f"predictions-agent-{args.model}_{args.batch}_k-{args.k_examples}.json"
     with open(results_file, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(results, f, indent=2, cls=EnumEncoder)
     
     print(f"\nBenchmark complete!")
     print(f"Predictions saved to {pred_file}")

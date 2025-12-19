@@ -24,15 +24,11 @@ class AgentConfig:
         self,
         max_iterations: int = 10,
         max_refinements: int = 3,
-        require_schema: bool = True,
-        require_examples: bool = False,
         validate_before_execute: bool = True,
         verbose: bool = True
     ):
         self.max_iterations = max_iterations
         self.max_refinements = max_refinements
-        self.require_schema = require_schema
-        self.require_examples = require_examples
         self.validate_before_execute = validate_before_execute
         self.verbose = verbose
 
@@ -41,6 +37,7 @@ class NL2SQLAgent:
     def __init__(
         self,
         model_type: str = "qwen",
+        k: int = 3,
         config: AgentConfig = None,
     ):
       """
@@ -53,17 +50,18 @@ class NL2SQLAgent:
       """
       self.config = config
       self.model_type = model_type
+      self.k = k
       self.max_iterations = config.max_iterations
       self.max_refinements = config.max_refinements
       self.verbose = config.verbose
 
-      self.prompt_builder = PromptBuilder(model_type=model_type, config=self.config)
+      self.prompt_builder = PromptBuilder(config=self.config)
 
       self.current_state = AgentState.ANALYZE
       self.iteration_count = 0
       self.refinement_count = 0
 
-    def run(self, question: str, db_id: str, db_path: str, k=3) -> Dict[str, Any]:
+    def run(self, question: str, db_id: str, db_path: str) -> Dict[str, Any]:
         """
         Run the agent on a natural language question
         
@@ -93,12 +91,12 @@ class NL2SQLAgent:
 
             # Max iteration check
             if self.iteration_count > self.max_iterations:
-                logging.warning(f"Max iterations ({self.max_iterations}) reached")
+                logger.warning(f"Max iterations ({self.max_iterations}) reached")
                 self.current_state = AgentState.FAIL
                 break
 
             if self.verbose:
-                logging.info(f"Iteration {self.iteration_count}: State = {self.current_state.value}")
+                logger.info(f"Iteration {self.iteration_count}: State = {self.current_state.value}")
 
             try:
                 step_result = self._execute_state(self.current_state, memory)
@@ -204,12 +202,12 @@ class NL2SQLAgent:
             actions.append("get_db_schema")
 
         if needs_examples:
-            examples = self.tools.search_similar_examples(memory.qeustion, k=self.k)
+            examples = self.tools.search_similar_examples(memory.question, k=self.k)
             memory.examples = examples
             actions.append("search_similar_examples")
 
         next_state = AgentState.GENERATE_SQL if memory.has_examples() and memory.has_schema() else AgentState.GATHER_INFO
-        
+
         return {
             "state": AgentState.GATHER_INFO.value,
             "action": ", ".join(actions) if actions else "ready",
@@ -219,10 +217,8 @@ class NL2SQLAgent:
     def _handle_generate_sql(self, memory: AgentMemory) -> Dict[str, Any]:
         """Handle GENERATE_SQL state - generate SQL query"""
         prompt = self.prompt_builder.build_prompt(AgentState.GENERATE_SQL, memory)
-
         response = self._get_llm_response(prompt)
-        sql = self.extract_sql(response.strip())
-
+        sql = extract_sql(response.strip())
         memory.add_sql_attempt(
             sql=sql,
             state=AgentState.GENERATE_SQL.value,
@@ -319,7 +315,7 @@ class NL2SQLAgent:
         prompt = self.prompt_builder.build_prompt(AgentState.REFINE_SQL, memory)
         
         response = self._get_llm_response(prompt)
-        refined_sql = self.extract_sql(response.strip())
+        refined_sql = extract_sql(response.strip())
         
         # Record refinement attempt
         memory.add_sql_attempt(
@@ -342,6 +338,13 @@ class NL2SQLAgent:
                         temperature=0, 
                         streaming=False, 
                         verbose=True)
+        
+        if self.model_type == "mistral":
+            return OllamaLLM(
+                        model="mistral:7b-instruct-q5_K_M",
+                        temperature=0,
+                        streaming=False,
+                        verbose=True)
 
         if self.model_type == "sonnet":
             from claude_integration import get_claude_client
@@ -353,7 +356,7 @@ class NL2SQLAgent:
         response = ""
         valid_actions = ["get_db_schema", "search_similar_examples", "generate_sql"]
         try:
-            if self.model_type == "qwen":
+            if self.model_type in ["qwen", "mistral"]:
                 response = model.invoke(prompt)
             if self.model_type == "sonnet":
                 message = model.messages.create(
@@ -382,7 +385,7 @@ class NL2SQLAgent:
         """Get a full LLM response"""
         model = self._get_llm()
         try:
-            if self.model_type == "qwen":
+            if self.model_type in ["qwen", "mistral"]:
                 response = model.invoke(prompt)
             if self.model_type == "sonnet":
                 message = model.messages.create(
@@ -431,7 +434,9 @@ class NL2SQLAgent:
                 "result": last_success.result,
                 "iterations": self.iteration_count,
                 "refinements": self.refinement_count,
-                "trace": trace if self.verbose else None
+                "trace": trace if self.verbose else None,
+                "error": memory.last_error.get("error") if memory.last_error else None,
+                "error_type": memory.last_error.get("error_type") if memory.last_error else None,
             }
         else:
             return {
