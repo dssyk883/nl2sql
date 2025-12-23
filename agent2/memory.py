@@ -1,12 +1,12 @@
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
+from agent2.states import AgentState, ActionType
 
 @dataclass
 class SQLAttempt:
     sql: str
     timestamp: datetime
-    state: str
     success: bool
     error: Optional[Dict[str, Any]] = None
     result: Optional[Any] = None
@@ -33,6 +33,9 @@ class AgentMemory:
     
     # SQL generation history
     sql_attempts: List[SQLAttempt] = field(default_factory=list)
+
+    # Action history
+    action_history: List[Dict[str, Any]] = field(default_factory=list)
     
     # Error tracking
     last_error: Optional[Dict[str, Any]] = None
@@ -46,19 +49,25 @@ class AgentMemory:
     # Metadata
     start_time: datetime = field(default_factory=datetime.now)
 
+    def add_action(
+            self,
+            action: ActionType,
+            state: AgentState,
+            result: str
+    ):
+        self.action_history.append({'action': action, 'state': state, 'result': result})
+
     def add_sql_attempt(
         self,
         sql: str,
-        state: str,
         success: bool = False,
         error: Optional[Dict[str, Any]] = None,
-        result: Optional[Any] = None,
+        result: Optional[str] = None,
         confidence: Optional[float] = None
     ):
         attempt = SQLAttempt(
             sql=sql,
             timestamp=datetime.now(),
-            state=state,
             success=success,
             error=error,
             result=result,
@@ -82,7 +91,17 @@ class AgentMemory:
         if self.sql_attempts:
             return self.sql_attempts[-1].sql
         return None
+       
+    def get_last_action(self) -> Optional[str]: # the most recent action
+        if self.action_history:
+            return self._format_action(self.action_history[-1])
+        return None
     
+    def get_last_result(self) -> Optional[str]:
+        if self.sql_attempts:
+            return self.sql_attempts[-1].result
+        return None
+
     def get_failed_attempts(self) -> List[SQLAttempt]: # all failed SQL attempts
         return [attempt for attempt in self.sql_attempts if not attempt.success]
     
@@ -145,3 +164,21 @@ class AgentMemory:
             formatted.append("\n".join(parts))
 
         return "\n\n".join(formatted)
+    
+    def _format_action(self, actions: Optional[List[Dict[str, str]]]) -> str:
+        """
+        Format Action history for LLM context
+        Args:
+            actions: List of previous actions. If None, get all action history
+        """
+        actions_to_format = actions if actions is not None else self.action_history
+
+        if not actions_to_format:
+            return "No previous actions"
+        
+        formatted = []
+        for idx, action in enumerate(actions_to_format, 1):
+            parts = [f"Action #{idx}", f"Action: {action['action'].val}",
+                     f"State: {action['state'].val}", f"Result: {action['result']}"]
+            formatted.append("\n".join(parts))
+            

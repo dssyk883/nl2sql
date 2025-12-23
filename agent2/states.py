@@ -1,3 +1,4 @@
+from typing import List
 from enum import Enum
 
 class AgentState(Enum):
@@ -22,13 +23,13 @@ class ActionType(Enum):
     # FAIL = "fail" # Need this?
 
 STATE_ACTIONS = {
-    AgentState.SQL_STATE = [
+    AgentState.SQL_STATE: [
         ActionType.GET_DB_SCHEMA,
         ActionType.GENERATE_SQL,
         ActionType.FEW_SHOT_SELECT,
         ActionType.VALIDATE_SQL
     ],
-    AgentState.POST_EXEC_STATE = [
+    AgentState.POST_EXEC_STATE: [
         ActionType.EXECUTE_SQL,
         ActionType.CHECK_SEMANTIC
     ]
@@ -72,3 +73,6 @@ def classify_error(error_msg: str) -> ErrorType:
         return ErrorType.TIMEOUT_ERROR
     
     return ErrorType.UNKNOWN_ERROR
+
+def get_available_workers(state: AgentState) -> List[ActionType]:
+    return STATE_ACTIONS[state]
