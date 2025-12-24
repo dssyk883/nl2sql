@@ -21,24 +21,6 @@ class PromptBuilder:
             ActionType.EXECUTE_SQL: "Execute the generated SQL query",
             ActionType.FEW_SHOT_SELECT: "Select a few-shot example strategy",
         }
-    
-    def build_prompt(
-        self,
-        state: AgentState,
-        memory: AgentMemory
-    ) -> str:
-        if state == AgentState.GET_DB_SCHEMA:
-            return self._build_get_db_prompt(state, memory)
-        elif state == AgentState.VALIDATE_SQL:
-            return self._build_validate_sql_prompt(state, memory)
-        elif state == AgentState.GENERATE_SQL:
-            return self._build_generate_sql_prompt(state, memory)
-        elif state == AgentState.CHECK_SEMANTIC:
-            return self._build_check_semantic_prompt(state, memory)
-        elif state == ActionType.FEW_SHOT_SELECT:
-            return self._build_few_shot_prompt(state, memory)
-        else:
-            return ""
 
     def build_decision_prompt(self, state: AgentState, memory:AgentMemory) -> str:
         sql = memory.get_last_sql()
@@ -61,7 +43,7 @@ Your job is to decide the NEXT worker to call.
 [DB Schema Summary]
 {schema_summary if schema_summary else "No DB schema loaded yet"}
 
-[Previous Actions]
+[Last Action]
 {last_action if last_action else "No action done yet"}
 
 [Instructions]
@@ -87,24 +69,7 @@ Your job is to decide the NEXT worker to call.
 [Example Outputs]
 {self.EXAMPLE_OUTPUT}
     """
-
-    def _format_workers(self, actions: List[ActionType]) -> str:
-        formatted = []
-        for i, action in enumerate(actions):
-            description = self.ACTION_DESCRIPTIONS.get(action, "No description")
-            formatted.append(f"{i}. {action.value}: {description}")
-        
-        return "\n".join(formatted)
-
-    def _format_examples(self, examples: List[Dict[str, str]] = None) -> str:
-        if not examples:
-            return "No examples"
-        formatted = []
-        for ex in examples:
-            formatted.append(f"Question: {ex['input']}\nSQL:{ex['query']}")
-        return '\n'.join(formatted)
-
-    
+   
     def build_generate_sql_prompt(self, memory: AgentMemory) -> str:
         examples = self._format_examples(memory.examples)
         return f"""You are a SQLite expert. Learn these natural languages to SQL examples.
@@ -128,8 +93,65 @@ Question: {memory.question}
         sql = memory.get_last_sql()
         execution_result = memory.get_last_execution_result()
         schema = memory.schema_summary
+        return f"""You are a semantic validator for NL2SQL systems.
+Your task is to verify if the SQL query and its results correctly answer the user's question.
 
+[User Question]
+{memory.question}
 
+[Generated SQL]
+{sql}
+
+[Query Execution Result]
+{execution_result if execution_result else "Query not executed yet"}
+
+[Database Schema Context]
+{schema}
+
+[Validation Criteria]
+1. Logic Alignment: Does the SQL logic match the question's intent?
+2. Result Relevance: Do the results make sense for the question?
+3. Completeness: Does the query capture all aspects of the question?
+4. Correctness: Are there any logical errors (wrong JOINs, filters, aggregations)?
+
+[Output Format - JSON Only]
+{{
+    "is_valid": true/false,
+    "alignment_score": 0.0-1.0,
+    "issue type": ["issue1", "issue2"],
+    "reasoning": "detailed explanation",
+    "suggested_fix": "what needs to change (if invalid)"
+}}
+
+Examples:
+Question: "How many users registered in 2024?"
+SQL: SELECT COUNT(*) FROM users WHERE YEAR(created_at) = 2024
+Result: 150
+{{"is_valid": true, "alignment_score": 0.95, "issues": null, "reasoning": "Query correctly counts users with 2024 filter", "suggested_fix": null}}
+
+Question: "Show top 5 products by revenue"
+SQL: SELECT product_name FROM products ORDER BY price DESC LIMIT 5
+Result: [product names]
+{{"is_valid": false, "alignment_score": 0.3, "issues": ["Using price instead of revenue", "Missing revenue calculation"], "reasoning": "Query sorts by price, not revenue", "suggested_fix": "Should SUM(order_items.quantity * order_items.price) and JOIN with orders"}}
+
+Now validate the query above.
+"""
+    def _format_workers(self, actions: List[ActionType]) -> str:
+        formatted = []
+        for i, action in enumerate(actions):
+            description = self.ACTION_DESCRIPTIONS.get(action, "No description")
+            formatted.append(f"{i}. {action.value}: {description}")
+        
+        return "\n".join(formatted)
+
+    def _format_examples(self, examples: List[Dict[str, str]] = None) -> str:
+        if not examples:
+            return "No examples"
+        formatted = []
+        for ex in examples:
+            formatted.append(f"Question: {ex['input']}\nSQL:{ex['query']}")
+        return '\n'.join(formatted)
+    
     def _format_attempts(self, attempts: Optional[List[SQLAttempt]] = None) -> str:
         """
         Format SQL Attempts for LLM context

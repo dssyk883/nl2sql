@@ -78,10 +78,6 @@ class NL2SQLAgent:
             decision = self.decide(self.state, self.memory)
         
 
-    def decide(self, state=AgentState, memory=AgentMemory):
-        prompt = self.prompt_builder.build_decision_prompt(state, memory)
-        response = self.
-
     def _load_model(self):
         return OllamaLLM(model="qwen2.5-coder:7b",
                          temperature=0, 
