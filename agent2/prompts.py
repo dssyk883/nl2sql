@@ -4,7 +4,7 @@ Generates state specific prompts for the LLM
 """
 
 from typing import Dict, Optional, List
-from agent2.states import AgentState, ActionType, get_available_workers
+from agent2.states import AgentState, ActionType, get_available_actions
 from agent2.memory import AgentMemory, SQLAttempt
 from langchain_core.prompts.prompt import PromptTemplate
 from langchain_core.prompts.chat import ChatPromptTemplate
@@ -145,109 +145,30 @@ Your analysis:
             ]
         )
 
-    
-    def build_semantic_check_prompt(self, memory:AgentMemory) -> str:
-        sql = memory.get_last_sql()
-        execution_result = memory.get_last_execution_result()
-        schema = memory.schema_summary
-        return f"""You are a semantic validator for NL2SQL systems.
-Your task is to verify if the SQL query and its results correctly answer the user's question.
-
-[User Question]
-{memory.question}
-
-[Generated SQL]
-{sql}
-
-[Query Execution Result]
-{execution_result if execution_result else "Query not executed yet"}
-
-[Database Schema Context]
-{schema}
-
-[Validation Criteria]
-1. Logic Alignment: Does the SQL logic match the question's intent?
-2. Result Relevance: Do the results make sense for the question?
-3. Completeness: Does the query capture all aspects of the question?
-4. Correctness: Are there any logical errors (wrong JOINs, filters, aggregations)?
-
-[Output Format - JSON Only]
-{{
-    "is_valid": true/false,
-    "alignment_score": 0.0-1.0,
-    "issue type": ["issue1", "issue2"],
-    "reasoning": "detailed explanation",
-    "suggested_fix": "what needs to change (if invalid)"
-}}
-
-Examples:
-Question: "How many users registered in 2024?"
-SQL: SELECT COUNT(*) FROM users WHERE YEAR(created_at) = 2024
-Result: 150
-{{"is_valid": true, "alignment_score": 0.95, "issues": null, "reasoning": "Query correctly counts users with 2024 filter", "suggested_fix": null}}
-
-Question: "Show top 5 products by revenue"
-SQL: SELECT product_name FROM products ORDER BY price DESC LIMIT 5
-Result: [product names]
-{{"is_valid": false, "alignment_score": 0.3, "issues": ["Using price instead of revenue", "Missing revenue calculation"], "reasoning": "Query sorts by price, not revenue", "suggested_fix": "Should SUM(order_items.quantity * order_items.price) and JOIN with orders"}}
-
-Now validate the query above.
-"""
-        return PromptTemplate(
-            input_variables=[
-                
-            ],
-            template=template
-        )
-
     def build_decision_prompt(self, state: AgentState, memory:AgentMemory) -> str:
         """Build the complete decision prompt"""
         sql = memory.get_last_sql()
-        prev_ex_result = memory.get_last_execution_result()
-        schema_summary = memory.schema_summary
+        last_execution_result = memory.get_last_execution_result()
+        last_error = memory.get_last_error()
         last_action = self._format_action(memory.get_last_action())
-        available_workers = self._format_workers(get_available_workers(state))
+        available_actions = self._format_workers(get_available_actions(
+            state=state,
+            memory=memory,
+        ))
+        return self.templates['decision'].format(
+            question=memory.question,
+            current_state=state.value,
+            current_checkpoint=memory.checkpoint.value,
+            current_sql=sql,
+            execution_result=last_execution_result,
+            last_error=last_error,
+            schema_summary=memory.schema_summary,
+            last_action=last_action,
+            available_actions=available_actions,
+            example_decision=self.EXAMPLE_DECISION
+        )
 
-        return f"""You are an Agent Controller for an NL2SQL system.
-Your job is to decide the NEXT worker to call.
-
-[Question]
-{memory.question}
-[Current SQL]
-{sql if sql else "No SQL yet"}
-
-[Execution Result]
-{prev_ex_result if prev_ex_result else "No execution result yet"}
-
-[DB Schema Summary]
-{schema_summary if schema_summary else "No DB schema loaded yet"}
-
-[Last Action]
-{last_action if last_action else "No action done yet"}
-
-[Instructions]
-- Choose exactly ONE next worker.
-- Available workers:
-{available_workers}
-
-- If you choose Few-shot Selector, specify:
-- strategy: Random | Intent cluster | Jaccard
-- k: number of examples
-
-- Respond ONLY in valid JSON.
-- Do NOT include explanations outside JSON.
-
-[JSON Output Format]
-{{
-"worker": "<worker_name>",
-"params": {{}},
-"reasoning": "...",
-"confidence": 0.0-1.0
-}}
-
-[Example Outputs]
-{self.EXAMPLE_OUTPUT}
-    """
+        
    
     def build_generate_sql_prompt(self, memory: AgentMemory) -> str:
         examples = self._format_examples(memory.examples)
@@ -268,53 +189,6 @@ Critical Rules:
 Question: {memory.question}
 """
     
-    def build_semantic_check_prompt(self, memory:AgentMemory) -> str:
-        sql = memory.get_last_sql()
-        execution_result = memory.get_last_execution_result()
-        schema = memory.schema_summary
-        return f"""You are a semantic validator for NL2SQL systems.
-Your task is to verify if the SQL query and its results correctly answer the user's question.
-
-[User Question]
-{memory.question}
-
-[Generated SQL]
-{sql}
-
-[Query Execution Result]
-{execution_result if execution_result else "Query not executed yet"}
-
-[Database Schema Context]
-{schema}
-
-[Validation Criteria]
-1. Logic Alignment: Does the SQL logic match the question's intent?
-2. Result Relevance: Do the results make sense for the question?
-3. Completeness: Does the query capture all aspects of the question?
-4. Correctness: Are there any logical errors (wrong JOINs, filters, aggregations)?
-
-[Output Format - JSON Only]
-{{
-    "is_valid": true/false,
-    "alignment_score": 0.0-1.0,
-    "issue type": ["issue1", "issue2"],
-    "reasoning": "detailed explanation",
-    "suggested_fix": "what needs to change (if invalid)"
-}}
-
-Examples:
-Question: "How many users registered in 2024?"
-SQL: SELECT COUNT(*) FROM users WHERE YEAR(created_at) = 2024
-Result: 150
-{{"is_valid": true, "alignment_score": 0.95, "issues": null, "reasoning": "Query correctly counts users with 2024 filter", "suggested_fix": null}}
-
-Question: "Show top 5 products by revenue"
-SQL: SELECT product_name FROM products ORDER BY price DESC LIMIT 5
-Result: [product names]
-{{"is_valid": false, "alignment_score": 0.3, "issues": ["Using price instead of revenue", "Missing revenue calculation"], "reasoning": "Query sorts by price, not revenue", "suggested_fix": "Should SUM(order_items.quantity * order_items.price) and JOIN with orders"}}
-
-Now validate the query above.
-"""
     def _format_workers(self, actions: List[ActionType]) -> str:
         formatted = []
         for i, action in enumerate(actions):
